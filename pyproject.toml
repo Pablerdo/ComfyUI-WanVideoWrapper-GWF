@@ -1,15 +1,15 @@
 [project]
-name = "ComfyUI-WanVideoWrapper"
+name = "ComfyUI-WanVideoWrapper-GWF"
 description = "ComfyUI wrapper nodes for WanVideo"
 version = "1.1.9"
 license = {file = "LICENSE"}
 dependencies = ["accelerate >= 1.2.1", "diffusers >= 0.32.0", "ftfy"]
 
 [project.urls]
-Repository = "https://github.com/kijai/ComfyUI-WanVideoWrapper"
+Repository = "https://github.com/Pablerdo/ComfyUI-WanVideoWrapper-GWF"
 #  Used by Comfy Registry https://comfyregistry.org
 
 [tool.comfy]
-PublisherId = "kijai"
-DisplayName = "ComfyUI-WanVideoWrapper"
+PublisherId = "Pablerdo"
+DisplayName = "ComfyUI-WanVideoWrapper-GWF"
 Icon = ""

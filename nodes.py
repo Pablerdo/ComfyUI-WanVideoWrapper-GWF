@@ -2480,6 +2480,7 @@ class WanVideoSampler:
 
             },
             "optional": {
+                "custom_noise": ("LATENT", {"tooltip": "Custom noise to use for sampling"}),
                 "samples": ("LATENT", {"tooltip": "init Latents to use for video2video process"} ),
                 "denoise_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "feta_args": ("FETAARGS", ),
@@ -2506,7 +2507,7 @@ class WanVideoSampler:
     def process(self, model, text_embeds, image_embeds, shift, steps, cfg, seed, scheduler, riflex_freq_index, 
         force_offload=True, samples=None, feta_args=None, denoise_strength=1.0, context_options=None, 
         cache_args=None, teacache_args=None, flowedit_args=None, batched_cfg=False, slg_args=None, rope_function="default", loop_args=None, 
-        experimental_args=None, sigmas=None, unianimate_poses=None, fantasytalking_embeds=None, uni3c_embeds=None):
+        experimental_args=None, sigmas=None, unianimate_poses=None, fantasytalking_embeds=None, uni3c_embeds=None, custom_noise=None):
         
         patcher = model
         model = model.model
@@ -2630,14 +2631,40 @@ class WanVideoSampler:
             if lat_h is None or lat_w is None:
                 raise ValueError("Clip encoded image embeds must be provided for I2V (Image to Video) model")
             fun_or_fl2v_model = image_embeds.get("fun_or_fl2v_model", False)
-            noise = torch.randn(
-                16,
-                (image_embeds["num_frames"] - 1) // 4 + (2 if end_image is not None and not fun_or_fl2v_model else 1),
-                lat_h,
-                lat_w,
-                dtype=torch.float32,
-                generator=seed_g,
-                device=torch.device("cpu"))
+            
+            # Use custom noise if provided, otherwise generate noise
+            if custom_noise is not None:
+                noise = custom_noise["samples"].squeeze(0)
+                log.info(f"Using custom noise with shape: {noise.shape}")
+                # Validate noise shape matches expected dimensions
+                expected_temporal_dim = (image_embeds["num_frames"] - 1) // 4 + (2 if end_image is not None and not fun_or_fl2v_model else 1)
+                expected_shape = (16, expected_temporal_dim, lat_h, lat_w)
+                if noise.shape != expected_shape:
+                    log.warning(f"Custom noise shape {noise.shape} doesn't match expected {expected_shape}. Attempting to reshape...")
+                    # Try to handle minor shape mismatches
+                    if noise.shape[0] != 16:
+                        raise ValueError(f"Custom noise channel dimension {noise.shape[0]} must be 16")
+                    if noise.shape[2] != lat_h or noise.shape[3] != lat_w:
+                        raise ValueError(f"Custom noise spatial dimensions {noise.shape[2:]} must match latent dimensions {(lat_h, lat_w)}")
+                    if noise.shape[1] != expected_temporal_dim:
+                        if noise.shape[1] < expected_temporal_dim:
+                            # Pad temporal dimension by repeating last frame
+                            pad_frames = expected_temporal_dim - noise.shape[1]
+                            noise = torch.cat([noise, noise[:, -1:].repeat(1, pad_frames, 1, 1)], dim=1)
+                        else:
+                            # Truncate temporal dimension
+                            noise = noise[:, :expected_temporal_dim]
+                        log.info(f"Adjusted custom noise temporal dimension to: {noise.shape}")
+                noise = noise.to(torch.float32)
+            else:
+                noise = torch.randn(
+                    16,
+                    (image_embeds["num_frames"] - 1) // 4 + (2 if end_image is not None and not fun_or_fl2v_model else 1),
+                    lat_h,
+                    lat_w,
+                    dtype=torch.float32,
+                    generator=seed_g,
+                    device=torch.device("cpu"))
             seq_len = image_embeds["max_seq_len"]
             
             clip_fea = image_embeds.get("clip_context", None)
@@ -2698,14 +2725,39 @@ class WanVideoSampler:
                             "seq_len": vace_additional_embeds[i]["vace_seq_len"]
                         })
 
-            noise = torch.randn(
-                    target_shape[0],
-                    target_shape[1] + 1 if has_ref else target_shape[1],
-                    target_shape[2],
-                    target_shape[3],
-                    dtype=torch.float32,
-                    device=torch.device("cpu"),
-                    generator=seed_g)
+            # Use custom noise if provided, otherwise generate noise for T2V
+            if custom_noise is not None:
+                noise = custom_noise["samples"].squeeze(0)
+                log.info(f"Using custom noise for T2V with shape: {noise.shape}")
+                # Validate noise shape matches expected dimensions
+                expected_temporal_dim = target_shape[1] + 1 if has_ref else target_shape[1]
+                expected_shape = (target_shape[0], expected_temporal_dim, target_shape[2], target_shape[3])
+                if noise.shape != expected_shape:
+                    log.warning(f"Custom noise shape {noise.shape} doesn't match expected {expected_shape}. Attempting to reshape...")
+                    # Try to handle minor shape mismatches
+                    if noise.shape[0] != target_shape[0]:
+                        raise ValueError(f"Custom noise channel dimension {noise.shape[0]} must be {target_shape[0]}")
+                    if noise.shape[2] != target_shape[2] or noise.shape[3] != target_shape[3]:
+                        raise ValueError(f"Custom noise spatial dimensions {noise.shape[2:]} must match target dimensions {(target_shape[2], target_shape[3])}")
+                    if noise.shape[1] != expected_temporal_dim:
+                        if noise.shape[1] < expected_temporal_dim:
+                            # Pad temporal dimension by repeating last frame
+                            pad_frames = expected_temporal_dim - noise.shape[1]
+                            noise = torch.cat([noise, noise[:, -1:].repeat(1, pad_frames, 1, 1)], dim=1)
+                        else:
+                            # Truncate temporal dimension
+                            noise = noise[:, :expected_temporal_dim]
+                        log.info(f"Adjusted custom noise temporal dimension to: {noise.shape}")
+                noise = noise.to(torch.float32)
+            else:
+                noise = torch.randn(
+                        target_shape[0],
+                        target_shape[1] + 1 if has_ref else target_shape[1],
+                        target_shape[2],
+                        target_shape[3],
+                        dtype=torch.float32,
+                        device=torch.device("cpu"),
+                        generator=seed_g)
             
             seq_len = math.ceil((noise.shape[2] * noise.shape[3]) / 4 * noise.shape[1])
 
@@ -2845,7 +2897,10 @@ class WanVideoSampler:
             seq_len = math.ceil((noise.shape[2] * noise.shape[3]) / 4 * context_frames)
 
             if context_options["freenoise"]:
-                log.info("Applying FreeNoise")
+                if custom_noise is not None:
+                    log.info("Applying FreeNoise to custom noise")
+                else:
+                    log.info("Applying FreeNoise")
                 # code from AnimateDiff-Evolved by Kosinkadink (https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved)
                 delta = context_frames - context_overlap
                 for start_idx in range(0, latent_video_length-context_frames, delta):
