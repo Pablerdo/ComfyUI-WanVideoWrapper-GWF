@@ -2635,7 +2635,9 @@ class WanVideoSampler:
             # Use custom noise if provided, otherwise generate noise
             if custom_noise is not None:
                 noise = custom_noise["samples"].squeeze(0)
-                log.info(f"Using custom noise with shape: {noise.shape}")
+                # Swap first two dimensions: (a, b, c, d) -> (b, a, c, d)
+                noise = noise.transpose(0, 1)
+                log.info(f"Using custom noise with shape: {noise.shape} (after dimension swap)")
                 # Validate noise shape matches expected dimensions
                 expected_temporal_dim = (image_embeds["num_frames"] - 1) // 4 + (2 if end_image is not None and not fun_or_fl2v_model else 1)
                 expected_shape = (16, expected_temporal_dim, lat_h, lat_w)
@@ -2728,7 +2730,9 @@ class WanVideoSampler:
             # Use custom noise if provided, otherwise generate noise for T2V
             if custom_noise is not None:
                 noise = custom_noise["samples"].squeeze(0)
-                log.info(f"Using custom noise for T2V with shape: {noise.shape}")
+                # Swap first two dimensions: (a, b, c, d) -> (b, a, c, d)
+                noise = noise.transpose(0, 1)
+                log.info(f"Using custom noise for T2V with shape: {noise.shape} (after dimension swap)")
                 # Validate noise shape matches expected dimensions
                 expected_temporal_dim = target_shape[1] + 1 if has_ref else target_shape[1]
                 expected_shape = (target_shape[0], expected_temporal_dim, target_shape[2], target_shape[3])
